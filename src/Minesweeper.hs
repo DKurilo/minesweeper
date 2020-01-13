@@ -110,7 +110,7 @@ setMines g (x, y) = do
 
 
 openCell :: Game -> Pos -> Game
-openCell NotStarted{} _ = error "Game wasn't initialized!"
+openCell g@NotStarted{} _ = g
 openCell g pos@(x,y) = case pos `M.lookup` b of
                            Just Closed | pos `S.member` ms -> g & board %~ M.insert pos BOOM
                                        | mc == 0 -> openAround (g & board %~ M.insert pos Empty) pos
@@ -135,7 +135,7 @@ markedAsMineAround g (x, y) =(sum . map (\pos' -> case pos' `M.lookup` b of
     where b = g ^. board
 
 invertMine :: Game -> Pos -> Game
-invertMine NotStarted{} _ = error "Game wasn't initialized!"
+invertMine g@NotStarted{} _ = g
 invertMine g pos = case pos `M.lookup` (g ^. board) of
                      Just Closed     -> gm
                      Just Mine       -> gc
@@ -145,7 +145,7 @@ invertMine g pos = case pos `M.lookup` (g ^. board) of
           gc = g & board %~ M.insert pos Closed & minesCount +~ 1
 
 invertSuspicious :: Game -> Pos -> Game
-invertSuspicious NotStarted{} _ = error "Game wasn't initialized!"
+invertSuspicious g@NotStarted{} _ = g
 invertSuspicious g pos@(x, y) = case pos `M.lookup` (g ^. board) of
                                   Just Closed     -> gs
                                   Just Mine       -> gs
@@ -155,7 +155,7 @@ invertSuspicious g pos@(x, y) = case pos `M.lookup` (g ^. board) of
           gc = g & board %~ M.insert pos Closed
 
 openAround :: Game -> Pos -> Game
-openAround NotStarted{} _ = error "Game wasn't initialized!"
+openAround g@NotStarted{} _ = g
 openAround g (x, y) = foldl (\g' pos -> let g'' = openCell g' pos in
                                       case pos `M.lookup` (g' ^. board) of
                                           Just Closed -> g''
@@ -163,13 +163,13 @@ openAround g (x, y) = foldl (\g' pos -> let g'' = openCell g' pos in
                           g [(x + dx, y + dy) | dx <- [-1..1], dy <- [-1..1], dx /= 0 || dy /= 0]
 
 discover :: Game -> Pos -> Game
-discover NotStarted{} _ = error "Game wasn't initialized!"
+discover g@NotStarted{} _ = g
 discover g pos@(x, y) = case pos `M.lookup` (g ^. board) of
                             Just (Around x) | markedAsMineAround g pos == x -> openAround g pos
                             _ -> g
 
 revealMines :: Game -> Game
-revealMines NotStarted{} = error "Game wasn't initialized!"
+revealMines g@NotStarted{} = g
 revealMines g = g & board %~ M.mapWithKey check
     where check pos cell = case cell of
                                Mine | pos `S.notMember` ms    -> WrongMine
@@ -179,26 +179,26 @@ revealMines g = g & board %~ M.mapWithKey check
           ms = g ^. mines
 
 foundMines :: Game -> Int
-foundMines NotStarted{} = error "Game wasn't initialized!"
+foundMines g@NotStarted{} = 0
 foundMines g = S.size . S.filter (\pos -> case pos `M.lookup` b of
                                               Just Mine -> True
                                               _         -> False) . view mines $ g
     where b = g ^. board
 
 checkResult :: Game -> Result
-checkResult NotStarted{} = error "Game wasn't initialized!"
+checkResult NotStarted{} = Playing
 checkResult g@Game{}
     | isExploded g = Loser
     | (g ^. minesCount) == 0 && allDefined g = Winner
     | otherwise = Playing
 
 isExploded :: Game -> Bool
-isExploded NotStarted{} = error "Game wasn't initialized!"
+isExploded NotStarted{} = False
 isExploded g = any (\pos -> b M.!? pos == Just BOOM) . S.toList . view mines $ g
     where b = g ^. board
 
 allDefined :: Game -> Bool
-allDefined NotStarted{} = error "Game wasn't initialized!"
+allDefined NotStarted{} = False
 allDefined g = all (\case Empty -> True
                           Mine -> True
                           Around _ -> True
