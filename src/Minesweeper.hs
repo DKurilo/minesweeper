@@ -4,13 +4,17 @@
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeOperators     #-}
+{-# LANGUAGE DerivingVia       #-}
 
 module Minesweeper
     ( Game(..)
+    , Counter(..)
+    , counterToInt
     , width
     , height
     , board
     , minesCount
+    , minesTotal
     , mines
     , playTime
     , Cell(..)
@@ -25,12 +29,14 @@ module Minesweeper
     , checkResult
     , tick
     , revealMines
+    , foundMines
     ) where
 
 import           Control.Lens    (makeLenses, view, (%~), (&), (+~), (.~), (^.))
 import           Control.Monad   (foldM)
 import qualified Data.Map        as M
 import           Data.Maybe      (fromMaybe)
+import           Data.Monoid
 import qualified Data.Set        as S
 import           Data.Text       (Text, words)
 import           Options         (Options, defaultConfig)
@@ -46,18 +52,30 @@ data Result = Winner | Loser | Playing
 data Cell = Closed | Empty | Suspicious | Mine | Around Int | BOOM | HiddenMine | WrongMine
     deriving (Eq, Show)
 
+newtype Counter = C Int
+    deriving (Eq, Ord, Num, Show, Read) via Int
+
+counterToInt :: Counter -> Int
+counterToInt (C x) = x
+
+instance Semigroup Counter where
+    (<>) = (+)
+
+instance Monoid Counter where
+    mempty = 0
+
 data Game = Game { _width      :: Int
                  , _height     :: Int
-                 , _minesCount :: Int
+                 , _minesCount :: Counter
+                 , _minesTotal :: Int
                  , _mines      :: S.Set Pos
                  , _board      :: M.Map Pos Cell
-                 , _playTime   :: Int
+                 , _playTime   :: Counter
                  }
           | NotStarted { _width      :: Int
                        , _height     :: Int
-                       , _minesCount :: Int
-                       , _playTime   :: Int
-                       } deriving (Show)
+                       , _minesTotal :: Int
+                       }
 makeLenses ''Game
 
 pickRandom :: [a] -> IO (a, [a])
@@ -67,7 +85,7 @@ pickRandom xs = do
     return (xs !! i, take i xs ++ drop (i+1) xs)
 
 initGame :: Text -> Options Unwrapped -> Game
-initGame defaultConfig os = NotStarted w h m 0
+initGame defaultConfig os = NotStarted w h m
     where w = fromMaybe dw (O.width os)
           h = fromMaybe dh (O.height os)
           m' = fromMaybe dm (O.mines os)
@@ -82,16 +100,17 @@ setMines g@Game {} _ = return g
 setMines g (x, y) = do
     let w = g ^. width
         h = g ^. height
-        m = g ^. minesCount
+        m = g ^. minesTotal
         board = M.fromList [((x, y), Closed) | x <- [0..(w - 1)], y <- [0..(h - 1)]]
     ms <- S.fromList . fst <$> foldM (\(ams, ms') _ -> do
                                           (mine, ms'') <- pickRandom ms'
                                           return (mine:ams, ms''))
                       ([], [(x', y') | x' <- [0..(w - 1)], y' <- [0..(h - 1)], x' /= x || y' /= y]) [1..m]
-    return (Game w h m ms board 0)
+    return (Game w h (C m) m ms board (C 0))
 
 
 openCell :: Game -> Pos -> Game
+openCell NotStarted{} _ = error "Game wasn't initialized!"
 openCell g pos@(x,y) = case pos `M.lookup` b of
                            Just Closed | pos `S.member` ms -> g & board %~ M.insert pos BOOM
                                        | mc == 0 -> openAround (g & board %~ M.insert pos Empty) pos
@@ -102,11 +121,13 @@ openCell g pos@(x,y) = case pos `M.lookup` b of
           ms = g ^. mines
 
 minesAround :: Game -> Pos -> Int
+minesAround NotStarted{} _ = error "Game wasn't initialized!"
 minesAround g (x, y) =(sum . map (\pos' -> if pos' `S.member` ms then 1 else 0))
                           [(x + dx, y + dy) | dx <- [-1..1], dy <- [-1..1], dx /= 0 || dy /= 0]
     where ms = g ^. mines
 
 markedAsMineAround :: Game -> Pos -> Int
+markedAsMineAround NotStarted{} _ = error "Game wasn't initialized!"
 markedAsMineAround g (x, y) =(sum . map (\pos' -> case pos' `M.lookup` b of
                                                       Just Mine -> 1
                                                       _         -> 0))
@@ -114,6 +135,7 @@ markedAsMineAround g (x, y) =(sum . map (\pos' -> case pos' `M.lookup` b of
     where b = g ^. board
 
 invertMine :: Game -> Pos -> Game
+invertMine NotStarted{} _ = error "Game wasn't initialized!"
 invertMine g pos = case pos `M.lookup` (g ^. board) of
                      Just Closed     -> gm
                      Just Mine       -> gc
@@ -123,6 +145,7 @@ invertMine g pos = case pos `M.lookup` (g ^. board) of
           gc = g & board %~ M.insert pos Closed & minesCount +~ 1
 
 invertSuspicious :: Game -> Pos -> Game
+invertSuspicious NotStarted{} _ = error "Game wasn't initialized!"
 invertSuspicious g pos@(x, y) = case pos `M.lookup` (g ^. board) of
                                   Just Closed     -> gs
                                   Just Mine       -> gs
@@ -132,6 +155,7 @@ invertSuspicious g pos@(x, y) = case pos `M.lookup` (g ^. board) of
           gc = g & board %~ M.insert pos Closed
 
 openAround :: Game -> Pos -> Game
+openAround NotStarted{} _ = error "Game wasn't initialized!"
 openAround g (x, y) = foldl (\g' pos -> let g'' = openCell g' pos in
                                       case pos `M.lookup` (g' ^. board) of
                                           Just Closed -> g''
@@ -139,11 +163,13 @@ openAround g (x, y) = foldl (\g' pos -> let g'' = openCell g' pos in
                           g [(x + dx, y + dy) | dx <- [-1..1], dy <- [-1..1], dx /= 0 || dy /= 0]
 
 discover :: Game -> Pos -> Game
+discover NotStarted{} _ = error "Game wasn't initialized!"
 discover g pos@(x, y) = case pos `M.lookup` (g ^. board) of
                             Just (Around x) | markedAsMineAround g pos == x -> openAround g pos
                             _ -> g
 
 revealMines :: Game -> Game
+revealMines NotStarted{} = error "Game wasn't initialized!"
 revealMines g = g & board %~ M.mapWithKey check
     where check pos cell = case cell of
                                Mine | pos `S.notMember` ms    -> WrongMine
@@ -152,22 +178,33 @@ revealMines g = g & board %~ M.mapWithKey check
                                _                              -> cell
           ms = g ^. mines
 
+foundMines :: Game -> Int
+foundMines NotStarted{} = error "Game wasn't initialized!"
+foundMines g = S.size . S.filter (\pos -> case pos `M.lookup` b of
+                                              Just Mine -> True
+                                              _         -> False) . view mines $ g
+    where b = g ^. board
+
 checkResult :: Game -> Result
-checkResult g
+checkResult NotStarted{} = error "Game wasn't initialized!"
+checkResult g@Game{}
     | isExploded g = Loser
     | (g ^. minesCount) == 0 && allDefined g = Winner
     | otherwise = Playing
 
 isExploded :: Game -> Bool
+isExploded NotStarted{} = error "Game wasn't initialized!"
 isExploded g = any (\pos -> b M.!? pos == Just BOOM) . S.toList . view mines $ g
     where b = g ^. board
 
 allDefined :: Game -> Bool
-allDefined = all (\case Empty -> True
-                        Mine -> True
-                        Around _ -> True
-                        BOOM -> True
-                        _ -> False) . M.elems . view board
+allDefined NotStarted{} = error "Game wasn't initialized!"
+allDefined g = all (\case Empty -> True
+                          Mine -> True
+                          Around _ -> True
+                          BOOM -> True
+                          _ -> False) . M.elems . view board $ g
 
 tick :: Game -> Game
+tick g@NotStarted{} = g
 tick g = g & playTime +~ 1

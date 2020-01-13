@@ -2,31 +2,28 @@
 
 module UI (startApp) where
 
-import           Control.Concurrent         (forkIO, threadDelay)
-import           Control.Monad              (forever, void)
-import           Control.Monad.IO.Class     (liftIO)
-import           Data.Maybe                 (fromMaybe)
-import           Minesweeper
-
 import           Brick                      (App (..), AttrMap, AttrName,
                                              BrickEvent (..), EventM, Next,
                                              Padding (..), Widget, attrMap,
                                              continue, customMain, emptyWidget,
-                                             fg, hBox, hLimit, halt, locL,
+                                             fg, hBox, hLimit, halt,
                                              neverShowCursor, on, padBottom,
                                              padLeft, padRight, str, txt, vBox,
-                                             vLimit, withAttr, withBorderStyle,
-                                             (<+>), (<=>))
+                                             withAttr, withBorderStyle, (<+>),
+                                             (<=>))
 import           Brick.BChan                (newBChan, writeBChan)
 import qualified Brick.Widgets.Border       as B
 import qualified Brick.Widgets.Border.Style as BS
 import qualified Brick.Widgets.Center       as C
+import           Control.Concurrent         (forkIO, threadDelay)
 import           Control.Lens               ((&), (+~), (^.), _1, _2)
+import           Control.Monad              (forever, void)
+import           Control.Monad.IO.Class     (liftIO)
 import qualified Data.Map                   as M
-import           Data.Sequence              (Seq)
-import qualified Data.Sequence              as S
+import           Data.Maybe                 (fromMaybe)
 import           Data.Text                  (Text)
 import qualified Graphics.Vty               as V
+import           Minesweeper
 
 data Tick = Tick
 
@@ -51,10 +48,17 @@ startApp g = do
     let builder = V.mkVty V.defaultConfig
     vty <- builder
     (GS pos g res) <- customMain vty builder (Just chan) app (GS (0, 0) g Playing)
-    case res of
-        Playing -> putStrLn "Well.. Next time! :)"
-        Winner -> putStrLn $ "You won in " ++ show (g ^. playTime) ++ " seconds! :)"
-        Loser -> putStrLn $ "BOOM! You lose in " ++ show (g ^. playTime) ++ " seconds. :("
+    case (res, g) of
+        (Playing, _) -> putStrLn "Well.. Next time! :)"
+        (Winner, Game{}) -> putStrLn $ "You won in " ++ show (g ^. playTime) ++ " seconds! :)"
+        (Loser, Game{}) -> putStrLn $ "BOOM! You lose in " ++ show (g ^. playTime) ++ " seconds. :("
+        (_, _) -> putStrLn "How is it possible? Contact this game's developer!"
+    let found = foundMines g
+        total = g ^. minesTotal
+    case g of
+        Game{} -> putStrLn $ "You found " ++ show found ++ " from " ++ show total ++
+                             ".\nField size: " ++ show (g ^. width) ++ "x" ++ show (g ^. height)
+        _ -> return ()
 
 -- Handling events
 
@@ -106,12 +110,17 @@ drawUI gs@(GS pos g res) = [ C.hCenter $ hLimit w  $ padBottom (Pad 1) (drawStat
     where w = (g ^. width) + 2
 
 drawStats :: Game -> Widget Name
-drawStats g = withBorderStyle BS.unicodeBold
-            $ B.border
-            $ hBox [ padLeft (Pad 1) (str $ show (g ^. minesCount))
-                   , str " | "
-                   , padRight (Pad 1) (str $ show (g ^. playTime))
-                   ]
+drawStats g@NotStarted{} = drawStats' (g ^. minesTotal) 0
+drawStats g              = drawStats' (g ^. minesCount) (g ^. playTime)
+
+drawStats' :: (Show a, Show b) => a -> b -> Widget Name
+drawStats' mc pt =  withBorderStyle BS.unicodeBold
+                 $ B.border
+                 $ hBox [ padLeft (Pad 1) (str $ show mc)
+                        , str " | "
+                        , padRight (Pad 1) (str $ show pt)
+                        ]
+
 
 drawGrid :: GameState -> Widget Name
 drawGrid (GS pos g res) = withBorderStyle BS.unicodeBold
