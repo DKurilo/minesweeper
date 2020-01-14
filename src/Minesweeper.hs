@@ -1,10 +1,10 @@
 {-# LANGUAGE DataKinds         #-}
 {-# LANGUAGE DeriveGeneric     #-}
+{-# LANGUAGE DerivingVia       #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE TemplateHaskell   #-}
 {-# LANGUAGE TypeOperators     #-}
-{-# LANGUAGE DerivingVia       #-}
 
 module Minesweeper
     ( Game(..)
@@ -34,6 +34,7 @@ module Minesweeper
 
 import           Control.Lens    (makeLenses, view, (%~), (&), (+~), (.~), (^.))
 import           Control.Monad   (foldM)
+import           Data.Coerce     (coerce)
 import qualified Data.Map        as M
 import           Data.Maybe      (fromMaybe)
 import           Data.Monoid
@@ -56,7 +57,7 @@ newtype Counter = C Int
     deriving (Eq, Ord, Num, Show, Read) via Int
 
 counterToInt :: Counter -> Int
-counterToInt (C x) = x
+counterToInt = coerce
 
 instance Semigroup Counter where
     (<>) = (+)
@@ -207,4 +208,4 @@ allDefined g = all (\case Empty -> True
 
 tick :: Game -> Game
 tick g@NotStarted{} = g
-tick g = g & playTime +~ 1
+tick g              = g & playTime +~ 1
