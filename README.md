@@ -3,6 +3,10 @@
 This is a console version of Minesweeper written in Haskell.  
 
 ## Install
+
+First install Stack.  
+https://docs.haskellstack.org/en/stable/README/
+
 ```
 git clone git@github.com:DKurilo/minesweeper.git
 cd ./minesweeper
